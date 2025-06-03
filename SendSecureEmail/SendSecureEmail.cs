@@ -89,7 +89,7 @@ namespace SecureEmailFunction
                 EmailRequest? emailRequest;
                 try
                 {
-                    emailRequest = JsonSerializer.Deserialize<EmailRequest>(requestBody, s_readOptions) 
+                    emailRequest = JsonSerializer.Deserialize<EmailRequest>(requestBody, s_readOptions); 
                 }
                 catch (JsonException)
                 {
