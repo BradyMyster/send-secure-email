@@ -25,11 +25,11 @@ on:
 env:
   AZURE_FUNCTIONAPP_NAME: 'app-communications'   # set this to your function app name on Azure
   AZURE_FUNCTIONAPP_PACKAGE_PATH: './SendSecureEmail'       # set this to the path to your function app project, defaults to the repository root
-  DOTNET_VERSION: '6.0.x'                   # set this to the dotnet version to use (e.g. '2.1.x', '3.1.x', '5.0.x')
+  DOTNET_VERSION: '8.0.x'                   # set this to the dotnet version to use (e.g. '2.1.x', '3.1.x', '5.0.x')
   EMAIL_API_KEY: ${{ secrets.EMAIL_API_KEY}}
-  SMTP_HOST: ${{ secrets.SMTP_HOST}}
-  SMTP_USER: ${{ secrets.SMTP_USER}}
-  SMTP_PASS: ${{ secrets.SMTP_PASS}}
+  SMTP_HOST: ${{ secrets.SMTP_HOST }}
+  SMTP_USER: ${{ secrets.SMTP_USER }}
+  SMTP_PASS: ${{ secrets.SMTP_PASS }}
   SMTP_PORT: 587
   ALLOWED_DOMAIN: ${{ secrets.ALLOWED_DOMAIN}}
   
