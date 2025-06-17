@@ -58,7 +58,7 @@ namespace SecureEmailFunction
 
         [Function("SendSecureEmail")]
         public static async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequest req,
+            [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequestData req,
              FunctionContext context)
         {
             var log = context.GetLogger("SendSecureEmail");
