@@ -1,6 +1,5 @@
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using System.ComponentModel.DataAnnotations;
@@ -58,12 +57,13 @@ namespace SecureEmailFunction
         // Fix for CA2254: Ensure that the logging message template is a constant string and does not vary between calls.
 
         [Function("SendSecureEmail")]
-        public static async Task<IActionResult> Run(
+        public static async Task<HttpResponseData> Run(
             [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequest req,
-            ILogger log)
+             FunctionContext context)
         {
+            var log = context.GetLogger("SendSecureEmail");
             try
-            {
+            {            
                 const string logMessageTriggered = "Email function triggered";
                 log.LogInformation(logMessageTriggered);
 
@@ -72,10 +72,11 @@ namespace SecureEmailFunction
 
                 // Check rate limiting
                 if (!IsWithinRateLimit(clientIp))
-                {
-                    const string logMessageRateLimitExceeded = "Rate limit exceeded for IP: {ClientIp}";
-                    log.LogWarning(logMessageRateLimitExceeded, clientIp);
-                    return new StatusCodeResult(429); // Too Many Requests
+                {                    
+                    log.LogWarning("Rate limit exceeded for IP: {ClientIp}", clientIp);
+                    var resp = req.CreateResponse(HttpStatusCode.TooManyRequests);
+                    await resp.WriteStringAsync("Too Many Requests");
+                    return resp;
                 }
 
                 // Read and validate request
@@ -83,7 +84,9 @@ namespace SecureEmailFunction
 
                 if (string.IsNullOrEmpty(requestBody))
                 {
-                    return new BadRequestObjectResult("Request body is required");
+                    var resp = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await resp.WriteStringAsync("Request body is required");
+                    return resp;
                 }
 
                 EmailRequest? emailRequest;
@@ -93,39 +96,47 @@ namespace SecureEmailFunction
                 }
                 catch (JsonException)
                 {
-                    return new BadRequestObjectResult("Invalid JSON format");
+                    var resp = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await resp.WriteStringAsync("Invalid JSON format");
+                    return resp;
                 }
 
                 // Validate request object
                 var validationResults = ValidateEmailRequest(emailRequest);
                 if (validationResults.Count > 0)
                 {
-                    return new BadRequestObjectResult(new
+                    var resp = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await resp.WriteStringAsync(JsonSerializer.Serialize(new
                     {
                         error = "Validation failed",
                         details = validationResults
-                    });
+                    }));
+                    return resp;
                 }
 
                 // Verify API key
                 if (emailRequest !=null && !VerifyApiKey(emailRequest.ApiKey))
-                {
-                    const string logMessageInvalidApiKey = "Invalid API key attempt from IP: {ClientIp}";
-                    log.LogWarning(logMessageInvalidApiKey, clientIp);
-                    return new UnauthorizedResult();
+                {                    
+                    log.LogWarning("Invalid API key attempt from IP: {ClientIp}", clientIp);
+                    var resp = req.CreateResponse(HttpStatusCode.Unauthorized);
+                    await resp.WriteStringAsync("Unauthorized");
+                    return resp;
                 }
 
                 // Additional security validations
                 if (emailRequest !=null && !IsValidEmailDomain(emailRequest.To))
                 {
-                    return new BadRequestObjectResult("Email domain not allowed");
+                    var resp = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await resp.WriteStringAsync("Email domain not allowed");
+                    return resp;
                 }
 
                 if (emailRequest !=null && ContainsSuspiciousContent(emailRequest.Subject, emailRequest.Body))
-                {
-                    const string logMessageSuspiciousContent = "Suspicious content detected from IP: {ClientIp}";
-                    log.LogWarning(logMessageSuspiciousContent, clientIp);
-                    return new BadRequestObjectResult("Content validation failed");
+                {                  
+                    log.LogWarning("Suspicious content detected from IP: {ClientIp}", clientIp);
+                    var resp = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await resp.WriteStringAsync("Content validation failed");
+                    return resp;
                 }
 
                 // Send email
@@ -139,21 +150,24 @@ namespace SecureEmailFunction
                 UpdateRateLimit(clientIp);
 
                 if (emailRequest == null)
-                {
-                    const string logMessageEmailRequestNull = "Email request is null";
-                    log.LogError(logMessageEmailRequestNull);
-                    return new BadRequestObjectResult("Email request cannot be null");
+                {                    
+                    log.LogError("Email request is null");
+                    var resp = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await resp.WriteStringAsync("Email request cannot be null");
+                    return resp;
                 }
 
-                const string logMessageEmailSent = "Email sent successfully to: {Recipient}";
-                log.LogInformation(logMessageEmailSent, emailRequest.To);
-                return new OkObjectResult(new { message = "Email sent successfully" });
+                log.LogInformation("Email sent successfully to: {Recipient}", emailRequest.To);
+                var okResp = req.CreateResponse(HttpStatusCode.OK);
+                await okResp.WriteStringAsync(JsonSerializer.Serialize(new { message = "Email sent successfully" }));
+                return okResp;
             }
             catch (Exception ex)
-            {
-                const string logMessageErrorOccurred = "Error occurred while sending email";
-                log.LogError(ex, logMessageErrorOccurred);
-                return new StatusCodeResult(500);
+            {                
+                log.LogError(ex, "Error occurred while sending email");
+                var resp = req.CreateResponse(HttpStatusCode.InternalServerError);
+                await resp.WriteStringAsync("Internal Server Error");
+                return resp;
             }
         }
 
@@ -162,24 +176,26 @@ namespace SecureEmailFunction
             PropertyNameCaseInsensitive = true
         };
 
-        private static string GetClientIpAddress(HttpRequest req)
+        private static string GetClientIpAddress(HttpRequestData req)
         {
             // Check for X-Forwarded-For header (common in load balancers)
-            string xForwardedFor = req.Headers["X-Forwarded-For"].FirstOrDefault() ?? "";
-            if (!string.IsNullOrEmpty(xForwardedFor))
+            if (req.Headers.TryGetValues("X-Forwarded-For", out var xForwardedFor))
             {
-                return xForwardedFor.Split(',')[0].Trim();
+                var ip = xForwardedFor.FirstOrDefault();
+                if (!string.IsNullOrEmpty(ip))
+                    return ip.Split(',')[0].Trim();
             }
 
             // Check for X-Real-IP header
-            string xRealIp = req.Headers["X-Real-IP"].FirstOrDefault() ?? "";
-            if (!string.IsNullOrEmpty(xRealIp))
+            if (req.Headers.TryGetValues("X-Real-IP", out var xRealIp))
             {
-                return xRealIp;
+                var ip = xRealIp.FirstOrDefault();
+                if (!string.IsNullOrEmpty(ip))
+                    return ip;
             }
 
             // Fallback to connection remote IP
-            return req.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            return "unknown";
         }
 
         private static bool IsWithinRateLimit(string clientIp)
