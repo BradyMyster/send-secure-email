@@ -59,13 +59,11 @@ namespace SecureEmailFunction
 
         [Function("SendSecureEmail")]
         public static async Task<IActionResult> Run(
-            [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequest req, FunctionContext context
-            )
+            [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequest req,
+            ILogger log)
         {
             try
             {
-                var log = context.GetLogger("SendSecureEmail");
-
                 const string logMessageTriggered = "Email function triggered";
                 log.LogInformation(logMessageTriggered);
 
