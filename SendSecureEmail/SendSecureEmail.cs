@@ -84,6 +84,7 @@ namespace SecureEmailFunction
 
                 if (string.IsNullOrEmpty(requestBody))
                 {
+                    log.LogWarning("Invalid Email Body");
                     var resp = req.CreateResponse(HttpStatusCode.BadRequest);
                     await resp.WriteStringAsync("Request body is required");
                     return resp;
@@ -96,6 +97,7 @@ namespace SecureEmailFunction
                 }
                 catch (JsonException)
                 {
+                    log.LogWarning("Error Parsing Email Body");
                     var resp = req.CreateResponse(HttpStatusCode.BadRequest);
                     await resp.WriteStringAsync("Invalid JSON format");
                     return resp;
@@ -105,6 +107,7 @@ namespace SecureEmailFunction
                 var validationResults = ValidateEmailRequest(emailRequest);
                 if (validationResults.Count > 0)
                 {
+                    log.LogWarning("Error Validating Email Request");
                     var resp = req.CreateResponse(HttpStatusCode.BadRequest);
                     await resp.WriteStringAsync(JsonSerializer.Serialize(new
                     {
