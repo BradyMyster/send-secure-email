@@ -346,7 +346,8 @@ namespace SecureEmailFunction
                 emailContent
             ));
 
-            log.LogInformation($"Email sent successfully. Status: {emailSendOperation.Status}");
+           const string logMessage ="Email sent successfully. Status: {status} From: {from} To: {to} Subject: {subject}";
+           log.LogInformation(logMessage,[emailSendOperation.Status.ToString(), emailRequest.From, emailRequest.To, emailRequest.Subject]);
 
             return Task.CompletedTask;
         }
