@@ -1,3 +1,4 @@
+using Azure.Communication.Email;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Caching.Memory;
@@ -43,11 +44,9 @@ namespace SecureEmailFunction
     {
         private static readonly IMemoryCache _cache = new MemoryCache(new MemoryCacheOptions());
         private static readonly string _validApiKey = Environment.GetEnvironmentVariable("EMAIL_API_KEY") ?? "";
-        private static readonly string _smtpHost = Environment.GetEnvironmentVariable("SMTP_HOST") ?? "";
-        private static readonly string _smtpUser = Environment.GetEnvironmentVariable("SMTP_USER") ?? "";
-        private static readonly string _smtpPass = Environment.GetEnvironmentVariable("SMTP_PASS") ?? "";
-        private static readonly int _smtpPort = int.Parse(Environment.GetEnvironmentVariable("SMTP_PORT") ?? "587");
+        private static readonly string _smtpFromEmail = Environment.GetEnvironmentVariable("SMTP_FROM_EMAIL") ?? "";
         private static readonly string _allowedDomain = Environment.GetEnvironmentVariable("ALLOWED_DOMAIN") ?? "";
+        private static readonly string _communicationService = Environment.GetEnvironmentVariable("ACS_CONNECTION_STRING") ?? "";
 
         // Rate limiting: 10 requests per hour per IP
         private const int MAX_REQUESTS_PER_HOUR = 10;
@@ -59,11 +58,11 @@ namespace SecureEmailFunction
         [Function("SendSecureEmail")]
         public static async Task<HttpResponseData> Run(
             [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequestData req,
-             FunctionContext context)
+            FunctionContext context)
         {
             var log = context.GetLogger("SendSecureEmail");
             try
-            {            
+            {
                 const string logMessageTriggered = "Email function triggered";
                 log.LogInformation(logMessageTriggered);
 
@@ -72,8 +71,9 @@ namespace SecureEmailFunction
 
                 // Check rate limiting
                 if (!IsWithinRateLimit(clientIp))
-                {                    
-                    log.LogWarning("Rate limit exceeded for IP: {ClientIp}", clientIp);
+                {
+                    const string logMessageRateLimitExceeded = "Rate limit exceeded for IP: {ClientIp}";
+                    log.LogWarning(logMessageRateLimitExceeded, clientIp);
                     var resp = req.CreateResponse(HttpStatusCode.TooManyRequests);
                     await resp.WriteStringAsync("Too Many Requests");
                     return resp;
@@ -84,7 +84,8 @@ namespace SecureEmailFunction
 
                 if (string.IsNullOrEmpty(requestBody))
                 {
-                    log.LogWarning("Invalid Email Body");
+                    const string logMessageInvalidBody = "Invalid Email Body";
+                    log.LogWarning(logMessageInvalidBody);
                     var resp = req.CreateResponse(HttpStatusCode.BadRequest);
                     await resp.WriteStringAsync("Request body is required");
                     return resp;
@@ -93,11 +94,12 @@ namespace SecureEmailFunction
                 EmailRequest? emailRequest;
                 try
                 {
-                    emailRequest = JsonSerializer.Deserialize<EmailRequest>(requestBody, s_readOptions); 
+                    emailRequest = JsonSerializer.Deserialize<EmailRequest>(requestBody, s_readOptions);
                 }
                 catch (JsonException)
                 {
-                    log.LogWarning("Error Parsing Email Body");
+                    const string logMessageJsonError = "Error Parsing Email Body";
+                    log.LogWarning(logMessageJsonError);
                     var resp = req.CreateResponse(HttpStatusCode.BadRequest);
                     await resp.WriteStringAsync("Invalid JSON format");
                     return resp;
@@ -107,7 +109,8 @@ namespace SecureEmailFunction
                 var validationResults = ValidateEmailRequest(emailRequest);
                 if (validationResults.Count > 0)
                 {
-                    log.LogWarning("Error Validating Email Request");
+                    const string logMessageValidationError = "Error Validating Email Request";
+                    log.LogWarning(logMessageValidationError);
                     var resp = req.CreateResponse(HttpStatusCode.BadRequest);
                     await resp.WriteStringAsync(JsonSerializer.Serialize(new
                     {
@@ -118,56 +121,62 @@ namespace SecureEmailFunction
                 }
 
                 // Verify API key
-                if (emailRequest !=null && !VerifyApiKey(emailRequest.ApiKey))
-                {                    
-                    log.LogWarning("Invalid API key attempt from IP: {ClientIp}", clientIp);
+                if (emailRequest != null && !VerifyApiKey(emailRequest.ApiKey))
+                {
+                    const string logMessageInvalidApiKey = "Invalid API key attempt from IP: {ClientIp}";
+                    log.LogWarning(logMessageInvalidApiKey, clientIp);
                     var resp = req.CreateResponse(HttpStatusCode.Unauthorized);
                     await resp.WriteStringAsync("Unauthorized");
                     return resp;
                 }
 
                 // Additional security validations
-                if (emailRequest !=null && !IsValidEmailDomain(emailRequest.To))
+                if (emailRequest != null && !IsValidEmailDomain(emailRequest.To))
                 {
+                    const string logMessageInvalidDomain = "Invalid Email Domain";
+                    log.LogWarning(logMessageInvalidDomain);
                     var resp = req.CreateResponse(HttpStatusCode.BadRequest);
                     await resp.WriteStringAsync("Email domain not allowed");
                     return resp;
                 }
 
-                if (emailRequest !=null && ContainsSuspiciousContent(emailRequest.Subject, emailRequest.Body))
-                {                  
-                    log.LogWarning("Suspicious content detected from IP: {ClientIp}", clientIp);
+                if (emailRequest != null && ContainsSuspiciousContent(emailRequest.Subject, emailRequest.Body))
+                {
+                    const string logMessageSuspiciousContent = "Suspicious content detected from IP: {ClientIp}";
+                    log.LogWarning(logMessageSuspiciousContent, clientIp);
                     var resp = req.CreateResponse(HttpStatusCode.BadRequest);
                     await resp.WriteStringAsync("Content validation failed");
                     return resp;
                 }
 
                 // Send email
-                if (emailRequest !=null)
+                if (emailRequest != null)
                 {
                     await SendEmailAsync(emailRequest, log);
                 }
-               
 
                 // Update rate limiting
                 UpdateRateLimit(clientIp);
 
                 if (emailRequest == null)
-                {                    
-                    log.LogError("Email request is null");
+                {
+                    const string logMessageNullRequest = "Email request is null";
+                    log.LogError(logMessageNullRequest);
                     var resp = req.CreateResponse(HttpStatusCode.BadRequest);
                     await resp.WriteStringAsync("Email request cannot be null");
                     return resp;
                 }
 
-                log.LogInformation("Email sent successfully to: {Recipient}", emailRequest.To);
+                const string logMessageSuccess = "Email sent successfully to: {Recipient}";
+                log.LogInformation(logMessageSuccess, emailRequest.To);
                 var okResp = req.CreateResponse(HttpStatusCode.OK);
                 await okResp.WriteStringAsync(JsonSerializer.Serialize(new { message = "Email sent successfully" }));
                 return okResp;
             }
             catch (Exception ex)
-            {                
-                log.LogError(ex, "Error occurred while sending email");
+            {
+                const string logMessageError = "Error occurred while sending email - {ErrorMessage}";
+                log.LogError(ex, logMessageError, ex.Message);
                 var resp = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await resp.WriteStringAsync("Internal Server Error");
                 return resp;
@@ -320,30 +329,26 @@ namespace SecureEmailFunction
             return false;
         }
 
-        private static async Task SendEmailAsync(EmailRequest emailRequest, ILogger log)
+        private static Task SendEmailAsync(EmailRequest emailRequest, ILogger log)
         {
-            using var client = new SmtpClient(_smtpHost, _smtpPort);
 
-            client.EnableSsl = true;
-            client.UseDefaultCredentials = false;
-            client.Credentials = new NetworkCredential(_smtpUser, _smtpPass);
-            client.Timeout = 30000; // 30 seconds timeout
+            var emailClient = new EmailClient(_communicationService);
 
-            var mailMessage = new MailMessage
-            {
-                From = new MailAddress(emailRequest.From ?? _smtpUser),
-                Subject = emailRequest.Subject,
-                Body = emailRequest.Body,
-                IsBodyHtml = false // Prevent HTML injection
+            var emailContent = new EmailContent(
+                   emailRequest.Subject
+             ){
+                Html = $"From {emailRequest.From}<br /><br />{emailRequest.Body}"
             };
 
-            mailMessage.To.Add(emailRequest.To);
+           var emailSendOperation = emailClient.SendAsync(Azure.WaitUntil.Completed, new EmailMessage(
+                 _smtpFromEmail,
+                emailRequest.To,
+                emailContent
+            ));
 
-            // Add security headers
-            mailMessage.Headers.Add("X-Mailer", "SecureAzureFunction");
-            mailMessage.Headers.Add("X-Priority", "3");
+            log.LogInformation($"Email sent successfully. Status: {emailSendOperation.Status}");
 
-            await client.SendMailAsync(mailMessage);
+            return Task.CompletedTask;
         }
     }
 }
