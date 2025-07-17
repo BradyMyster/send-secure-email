@@ -340,15 +340,16 @@ namespace SecureEmailFunction
                 Html = $"From {emailRequest.From}<br /><br />{emailRequest.Body}"
             };
 
-           var emailSendOperation = emailClient.SendAsync(Azure.WaitUntil.Completed, new EmailMessage(
+        
+            var emailSendOperation = emailClient.SendAsync(Azure.WaitUntil.Completed, new EmailMessage(
                  _smtpFromEmail,
                 emailRequest.To,
                 emailContent
-            ));
+            )).Result;
 
-           const string logMessage ="Email sent successfully. Status: {status} From: {from} To: {to} Subject: {subject}";
-           log.LogInformation(logMessage,[emailSendOperation.Status.ToString(), emailRequest.From, emailRequest.To, emailRequest.Subject]);
-
+            const string logMessage = "Email sent successfully. Status: {status} Sender: {from} System: {system} To: {to} Subject: {subject}";
+            log.LogInformation(logMessage, [emailSendOperation.Value.Status.ToString(), emailRequest.From, _smtpFromEmail, emailRequest.To, emailRequest.Subject]);
+        
             return Task.CompletedTask;
         }
     }
